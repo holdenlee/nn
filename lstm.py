@@ -107,7 +107,7 @@ def sequence_multiple_lstm(Cs0, hs0, xss, tparams):
 
 """Functions to evaluate the NN's and calculate loss"""
 #unmapped version. taking indices
-def fns_lstm(C0, h0, xis, yi, tparams1, tparams2)
+def fns_lstm(C0, h0, xis, yi, tparams1, tparams2):
     #, last_only = True):
     #evaluate the LSTM on this sequence
     [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
@@ -131,7 +131,7 @@ def fns_lstm(C0, h0, xis, yi, tparams1, tparams2)
     return acts_last, pred_last, loss_last, acc_last, acts, pred, loss
 
 #is ALMOST THE SAME as above...
-def fns_multiple_lstm(m, xis, yi, (tparams1, tparams2))
+def fns_multiple_lstm(m, xis, yi, (tparams1, tparams2)):
     C0 = np.zeros(m)
     h0 = np.zeros(m)
     #evaluate the LSTM on this sequence
@@ -200,7 +200,15 @@ def train_lstm(li_train, li_valid, li_test, n, m, s, batch_size):
     #loss_f = function([xis,yi],loss)
     #acc_f = function([xis,yi],acc)
 
-    train(patience=10,  # Number of epoch to wait before early stop if no progress
+    train(batch_maker, # : a -> [b] 
+          #function that given the data, returns a list batch identifiers (ex. [Int])
+          get_data_f, # : b -> a -> train
+          #function that given a list of batch identifiers, gives a function that takes the data and gives training
+          #CHECK the numpy initialization
+          loss, # : (train -> Theano Float)
+          acc,
+          args=[xis,yi],
+          patience=10,  # Number of epoch to wait before early stop if no progress
           max_epochs=5000,  # The maximum number of epoch to run,
           optimizer=rmsprop,
           saveto='model.npz',
@@ -212,13 +220,5 @@ def train_lstm(li_train, li_valid, li_test, n, m, s, batch_size):
           data_train=li_train , # : a (should be list of some sort)
           data_valid=li_valid, # : a
           data_test=li_test, # : a
-          batch_maker, # : a -> [b] 
-          #function that given the data, returns a list batch identifiers (ex. [Int])
-          get_data_f, # : b -> a -> train
-          #function that given a list of batch identifiers, gives a function that takes the data and gives training
-          #CHECK the numpy initialization
-          loss, # : (train -> Theano Float)
-          acc
-          args=[xis,yi]
 )
     

@@ -174,15 +174,6 @@ def rmsprop(lr, tparams, grads, cost, args):
     return f_grad_shared, f_update
 
 def train(
-    patience=10,  # Number of epoch to wait before early stop if no progress
-    max_epochs=5000,  # The maximum number of epoch to run,
-    dispFreq=10,  # Display to stdout the training progress every N updates
-    optimizer=rmsprop,
-    saveto='model.npz',
-    validFreq=370,  # Compute the validation error after this number of update.
-    saveFreq=1110,  # Save the parameters after every saveFreq updates
-    batch_size=16,  # The batch size during training.
-    valid_batch_size=64,  # The batch size used for validation/test set.
     init_params, # initial parameters (not in Theano)
     data_train, # : a (should be list of some sort)
     data_valid, # : a
@@ -195,7 +186,16 @@ def train(
         #cost function
     pred_error,
     args,
-    tparamss
+    tparamss,
+    patience=10,  # Number of epoch to wait before early stop if no progress
+    max_epochs=5000,  # The maximum number of epoch to run,
+    dispFreq=10,  # Display to stdout the training progress every N updates
+    optimizer=rmsprop,
+    saveto='model.npz',
+    validFreq=370,  # Compute the validation error after this number of update.
+    saveFreq=1110,  # Save the parameters after every saveFreq updates
+    batch_size=16,  # The batch size during training.
+    valid_batch_size=64,  # The batch size used for validation/test set.
 ):
     print 'Building model'
 
@@ -226,27 +226,27 @@ def train(
 
     #The data can be in two forms ([a], [b]) or [a].
     def _len(li_or_pair):
-        if type(li_or_pair)="tuple":
+        if type(li_or_pair)=="tuple":
             return len(li_or_pair[0])
         else:
             return len(li_or_pair)
 
     def get_first_if_tuple(maybe_tuple):
-        if type(maybe_tuple)="tuple":
+        if type(maybe_tuple)=="tuple":
             return maybe_tuple[0]
         else:
             return maybe_tuple
 
     l_train = _len(data_train)
     l_valid = _len(data_valid)
-    l_test = _len(data_test)
+    #l_test = _len(data_test)
 
     valid_batch_ids = batch_maker(data_valid)
-    test_batch_ids = batch_maker(data_test)
+    #test_batch_ids = batch_maker(data_test)
 
     print "%d train examples" % l_train
     print "%d valid examples" % l_valid
-    print "%d test examples" % l_test
+    #print "%d test examples" % l_test
 
     history_errs = []
     best_p = None
@@ -320,9 +320,9 @@ def train(
                     #use_noise.set_value(0.)
                     train_err = sum([pred_error(get_data_f(data_train, batch_id)) for batch_id in batch])/data_train.size[0]
                     valid_err = sum([pred_error(get_data_f(data_valid, batch_id)) for batch_id in batch_valid])/data_valid.size[0]
-                    test_err = sum([pred_error(get_data_f(data_test, batch_id)) for batch_id in batch])/data_test.size[0]
+                    #test_err = sum([pred_error(get_data_f(data_test, batch_id)) for batch_id in batch])/data_test.size[0]
 
-                    history_errs.append([valid_err, test_err])
+                    history_errs.append(valid_err) #[valid_err, test_err])
 
                     if (best_p is None or
                         valid_err <= np.array(history_errs)[:, 0].min()):
@@ -330,8 +330,8 @@ def train(
                         best_p = unzip(tparams)
                         bad_counter = 0
 
-                    print ('Train ', train_err, 'Valid ', valid_err,
-                           'Test ', test_err)
+                    print ('Train ', train_err, 'Valid ', valid_err) #,
+                           #'Test ', test_err)
 
                     if (len(history_errs) > patience and
                         valid_err >= np.array(history_errs)[:-patience, 0].min()):
@@ -355,19 +355,18 @@ def train(
     else:
         best_p = unzip(tparams)
 
-    use_noise.set_value(0.)
+#    use_noise.set_value(0.)
     kf_train_sorted = get_minibatches_idx(_len(train), batch_size)
-    train_err = pred_error(f_pred, prepare_data, train, kf_train_sorted)
-    valid_err = pred_error(f_pred, prepare_data, valid, kf_valid)
-    test_err = pred_error(f_pred, prepare_data, test, kf_test)
+    train_err = sum([pred_error(get_data_f(data_train, batch_id)) for batch_id in batch])/data_train.size[0]
+    valid_err = sum([pred_error(get_data_f(data_valid, batch_id)) for batch_id in batch_valid])/data_valid.size[0]
 
-    print 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err
+    print 'Train ', train_err, 'Valid ', valid_err #, 'Test ', test_err
     if saveto:
         np.savez(saveto, train_err=train_err,
-                    valid_err=valid_err, test_err=test_err,
+                    valid_err=valid_err, #test_err=test_err,
                     history_errs=history_errs, **best_p)
     print 'The code run for %d epochs, with %f sec/epochs' % (
         (eidx + 1), (end_time - start_time) / (1. * (eidx + 1)))
     print >> sys.stderr, ('Training took %.1fs' %
                           (end_time - start_time))
-    return train_err, valid_err, test_err
+    return train_err, valid_err #, test_err

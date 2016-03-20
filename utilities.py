@@ -1,3 +1,5 @@
+import itertools
+
 def case(var, li, else_expr=None):
     for (val, expr) in li:
         if val:
@@ -19,3 +21,9 @@ def ifs(li, else_expr=None):
         if stmt:
             return val
     return else_expr
+
+def concat(lis):
+    return itertools.chain(*lis)
+
+def union(*dicts):
+    return dict(sum(map(lambda dct: list(dct.items()), dicts), []))

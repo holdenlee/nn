@@ -176,13 +176,14 @@ def rmsprop(lr, tparams, grads, cost, args):
 def train(
     patience=10,  # Number of epoch to wait before early stop if no progress
     max_epochs=5000,  # The maximum number of epoch to run,
+    dispFreq=10,  # Display to stdout the training progress every N updates
     optimizer=rmsprop,
     saveto='model.npz',
     validFreq=370,  # Compute the validation error after this number of update.
     saveFreq=1110,  # Save the parameters after every saveFreq updates
     batch_size=16,  # The batch size during training.
     valid_batch_size=64,  # The batch size used for validation/test set.
-    init_params, # initial parameters
+    init_params, # initial parameters (not in Theano)
     data_train, # : a (should be list of some sort)
     data_valid, # : a
     data_test, # : a
@@ -193,27 +194,27 @@ def train(
     cost, # : (train -> Theano Float)
         #cost function
     pred_error,
-    args, # args to cost function.
-    mapped = False,
+    args,
+    tparamss
 ):
     print 'Building model'
 
-    if not(mapped):
-        cost = theano.map(cost, args)
-        pred_error = theano.map(pred_error,args)
-        #where are the variables?
-
     # initialize a theano variable dictionary with parameter values from init_params
-    tparams = wrap_theano_dict(init_params)
+    #tparamss = [wrap_theano_dict(init_param) for init_param in init_params]
+    #careful of overlapping...
+    tparams = union(tparamss)
 
     # use_noise is for dropout (TODO!!!)
     """(use_noise, x, mask,
      y, f_pred_prob, f_pred, cost) = build_model(tparams, model_options)"""
     
+    all_params=tparams.values()
+#concat([tparams.values() for tparams in tparamss])
+
     #compile the theano functions. Note "args" contains information about the length of the vectors, so this effectively locks in the sequence length. IS THIS TRUE?
     f_cost = theano.function(args, cost, name='f_cost')
 
-    grads = tensor.grad(cost, wrt=tparams.values())
+    grads = tensor.grad(cost, wrt=all_params)
     f_grad = theano.function(args, grads, name='f_grad')
 
     #learning rate
@@ -223,6 +224,7 @@ def train(
 
     print 'Optimization'
 
+    #The data can be in two forms ([a], [b]) or [a].
     def _len(li_or_pair):
         if type(li_or_pair)="tuple":
             return len(li_or_pair[0])
@@ -239,9 +241,8 @@ def train(
     l_valid = _len(data_valid)
     l_test = _len(data_test)
 
-    # list of list of randomly chosen indices.
-    kf_valid = get_minibatches_idx(l_valid, valid_batch_size)
-    kf_test = get_minibatches_idx(l_test, valid_batch_size)
+    valid_batch_ids = batch_maker(data_valid)
+    test_batch_ids = batch_maker(data_test)
 
     print "%d train examples" % l_train
     print "%d valid examples" % l_valid
@@ -251,8 +252,10 @@ def train(
     best_p = None
     bad_count = 0
 
+    #if no validation frequency is give, validate once an epoch
     if validFreq == -1:
         validFreq = l_train / batch_size
+    #if no save frequency is give, validate once an epoch
     if saveFreq == -1:
         saveFreq = l_train / batch_size
 
@@ -260,28 +263,37 @@ def train(
     estop = False  # early stop
     start_time = time.time()
     try:
+        #EPOCH LOOP
         #epoch index. (An epoch means going through the data once.)
         for eidx in range(max_epochs):
             n_samples = 0
             
+            # initialize epoch:
             # Get new shuffled index for the training set.
-            kf = get_minibatches_idx(l_train, batch_size, shuffle=True)
+            # kf = get_minibatches_idx(l_train, batch_size, shuffle=True)
+            batch_ids = batch_maker(data_train)
             
-            for _, train_index in kf:
-                #batch index
+            #BATCH LOOP
+            for batch_id in batch_maker:
+                #increase number of updates done by 1
                 uidx += 1
                 # use_noise.set_value(1.)
                 
                 # Select the random examples for this minibatch
+                """
                 if type(train)=="tuple":
                     inputs = map(lambda li: [li[t] for t in train_index], list(train))
                 else:
                     #only 1 argument. also wrap up in single-element list for consistency.
                     inputs = [[train[t] for t in train_index]]
                 n_samples += args[0].shape[0]
-
-                #unpack the list of arguments
-                cost = f_grad_shared(*inputs)
+                """
+                
+                #get the batch
+                batch = get_data_f(data_train, batch_id)
+                if not isinstance(batch, (list, tuple)):
+                    batch = [batch]
+                cost = f_grad_shared(*batch)
                 f_update(lrate)
 
                 if np.isnan(cost) or np.isinf(cost):
@@ -306,10 +318,9 @@ def train(
 
                 if np.mod(uidx, validFreq) == 0:
                     #use_noise.set_value(0.)
-                    train_err = pred_error(f_pred, prepare_data, train, kf)
-                    valid_err = pred_error(f_pred, prepare_data, valid,
-                                           kf_valid)
-                    test_err = pred_error(f_pred, prepare_data, test, kf_test)
+                    train_err = sum([pred_error(get_data_f(data_train, batch_id)) for batch_id in batch])/data_train.size[0]
+                    valid_err = sum([pred_error(get_data_f(data_valid, batch_id)) for batch_id in batch_valid])/data_valid.size[0]
+                    test_err = sum([pred_error(get_data_f(data_test, batch_id)) for batch_id in batch])/data_test.size[0]
 
                     history_errs.append([valid_err, test_err])
 

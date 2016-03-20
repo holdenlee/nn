@@ -37,6 +37,21 @@ def logloss_i(pred, actual_i):
 def corrected_log(x):
     return T.log(T.max(1e-6,x))
 
+#return dictionary of parameters (with default random initialization)
+def init_params_nn(n, m, init='zeros'):
+    rand_f = lambda l1, l2: np.asarray(np.random.normal(0, 1/np.sqrt(n), (l1,l2)))
+    (f, g) = case(init,
+                [('zeros', (np.zeros, lambda c, r: np.zeros((c, r)))),
+                 ('rand', (np.zeros, rand_f))])
+    return init_params_with_f_nn(n,m,f,g)
+
+#returns a dictionary of parameters, initialized using the functions f and g.
+def init_params_f_nn(n,m,f,g):
+    pairs = [("W",np.asarray(g(n, m))),
+             ("b",np.asarray(f(m)))]
+    return OrderedDict(pairs)
+
+
 """LSTM functions"""
 #x, C, h are the inputs, and C1, h1 as the outputs.
 #the rest are weight vectors.
@@ -91,21 +106,6 @@ def sequence_multiple_lstm(Cs0, hs0, xss, tparams):
     return sequence_lstm(Cs0, hs0, xss, tparams)
 
 """Functions to evaluate the NN's and calculate loss"""
-#tparams1 for LSTM, tparams2 for NN layer
-#R^m -> R^m -> R^{s x n} -> Parameters^2 -> Bool -> (R^n) or (R^{s x n})
-def predict_prob_lstm(C0, h0, xs, tparams1, tparams2, last_only=True):
-    [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
-    nn_layer_f = lambda x : nn_layer(x, tparams)
-    #CHECK that softmax maps correctly.
-    #for 2-D, softmax automatically maps. (Not true for 3-D+)
-    if last_only:
-        return softmax(nn_layer_f(h_vals[-1]))
-    else:
-        return softmax(nn_layer_f(h_vals)))
-
-def predict_lstm(C0, h0, xs, tparams1, tparams2, last_only=True):
-    return T.max(predict_prob_lstm(C0, h0, xs, tparams1, tparams 2, last_only))
-
 #unmapped version. taking indices
 def fns_lstm(C0, h0, xis, yi, tparams1, tparams2)
     #, last_only = True):
@@ -131,7 +131,9 @@ def fns_lstm(C0, h0, xis, yi, tparams1, tparams2)
     return acts_last, pred_last, loss_last, acc_last, acts, pred, loss
 
 #is ALMOST THE SAME as above...
-def fns_multiple_lstm(C0, h0, xis, yi, tparams1, tparams2)
+def fns_multiple_lstm(m, xis, yi, (tparams1, tparams2))
+    C0 = np.zeros(m)
+    h0 = np.zeros(m)
     #evaluate the LSTM on this sequence
     [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
     #feed into the neural net and get vector of activations
@@ -149,28 +151,10 @@ def fns_multiple_lstm(C0, h0, xis, yi, tparams1, tparams2)
     #http://stackoverflow.com/questions/23435782/numpy-selecting-specific-column-index-per-row-by-using-a-list-of-indexes
     return acts_last, pred_last, loss_last, acc_last, acts, pred, loss
 
-"""
-#R^m -> R^m -> R^{s x n} -> R^n or R^{s x n} -> Parameters^2 -> Bool -> R
-def loss_lstm(C0, h0, xs, y, tparams1, tparams2, last_only=True):
-    [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
-    nn_layer_f = lambda x : nn_layer(x, tparams)
-    outputs = if_f(last_only, softmax(nn_layer_f(h_vals[-1])), softmax(nn_layer_f(h_vals))))
-    return logloss(outputs, y)
-
-#accuracy is 1 if equal.
-def pred_acc_lstm(C0, h0, xs, y, tparams):
-    pred = predict_lstm(C0, h0, xs, tparams, True)
-    return (pred == y)
-
-#mapped version.
-def pred_acc_multiple_lstm(C0, h0, xs, y, tparams):
-    raise NotImplementedError
-"""
-
 #return dictionary of parameters (with default random initialization)
 def init_params_lstm(n, m, init='zeros'):
     #normalize this!
-    rand_f = lambda l1, l2: np.asarray(np.random.normal(0, 1/np.sqrt(d), (l1,l2)))
+    rand_f = lambda l1, l2: np.asarray(np.random.normal(0, 1/np.sqrt(n), (l1,l2)))
     (f, g) = case(init,
                 [('zeros', (np.zeros, lambda c, r: np.zeros((c, r)))),
                  ('rand', (np.zeros, rand_f))])
@@ -191,11 +175,9 @@ def init_params_with_f_lstm(n,m,f,g):
 #Int^b -> R^{l * n} -> (R^{b * s * n}, R^{b * n})
 def get_data_f(indices, data):
     #given indices, get the sequences in data starting at those indices.
-    #This is R^{b * s * n} 
-    seqs = [data[i:i+s-1] for i in indices]
-    #This is R^{b * n}
-    ys = [data[i+s-1] for i in indices]
-    return (seqs, ys)
+    #(seqs, ys)\in R^{b*s*n} * R^{b*n}
+    return ([data[i:i+s] for i in indices], [data[i+s-1] for i in indices])
+    #does s include last? 
 
 #li's are sequences, ex. [0,3,2,1,1,3,1]
 #the elements of the sequence are in [0..(n-1)], ex. n=4 above
@@ -204,32 +186,39 @@ def get_data_f(indices, data):
 def train_lstm(li_train, li_valid, li_test, n, m, s, batch_size):
     #m:Int -> Int -> R^m
     hot_li_train, hot_li_valid, hot_li_test = [map(lambda x: oneHot(n, x), li) for li in [li_train, li_valid, li_test]]
-    n_seqs_train, n_seqs_valid, n_seqs_test = [len(li) - s + 1 for li in [li_train, li_valid, li_test]]
+    #n_seqs_train, n_seqs_valid, n_seqs_test = [len(li) - s + 1 for li in [li_train, li_valid, li_test]]
     #note alternatively we can keep it as a single tensor...
 
     def batch_maker(data):
-        return get_minibatches_idx(len(data), batch_size, shuffle=True)
+        return get_minibatches_idx(len(data)-s, batch_size, shuffle=True)
+
+    xis = T.dtensor3('xis')
+    yi = T.dmatrix('yi')
+    tparams1 = init_params_lstm(m,n,'rand')
+    tparams2 = init_params_lstm(m,n,'rand')
+    _,_,loss,acc,_,_,_ = fns_multiple_lstm(m, xis, yi, tparams1, tparams2)
+    #loss_f = function([xis,yi],loss)
+    #acc_f = function([xis,yi],acc)
+
     train(patience=10,  # Number of epoch to wait before early stop if no progress
           max_epochs=5000,  # The maximum number of epoch to run,
           optimizer=rmsprop,
           saveto='model.npz',
-          validFreq=370,  # Compute the validation error after this number of update.
-          saveFreq=1110,  # Save the parameters after every saveFreq updates
+          validFreq=500,  # Compute the validation error after this number of update.
+          saveFreq=1000,  # Save the parameters after every saveFreq updates
           batch_size=16,  # The batch size during training.
           valid_batch_size=64,  # The batch size used for validation/test set.
           init_params=init_params_lstm(n, m), # initial parameters
           data_train=li_train , # : a (should be list of some sort)
           data_valid=li_valid, # : a
           data_test=li_test, # : a
-          batch_maker, # : a -> [[b]] 
-          #function that given the data, returns a list of list of batch identifiers (ex. Int)
-          get_data_f, # : [b] -> a -> train
-          #function that given a list of list of batch identifiers, gives a function that takes the data and gives training
+          batch_maker, # : a -> [b] 
+          #function that given the data, returns a list batch identifiers (ex. [Int])
+          get_data_f, # : b -> a -> train
+          #function that given a list of batch identifiers, gives a function that takes the data and gives training
           #CHECK the numpy initialization
-          cost = lambda (xs, y): loss_multi_lstm(np.zeros(m), np.zeros(m), xs, y, tparams1, tparams2, last_only=True), # : (train -> Theano Float)
-          #loss_lstm(C0, h0, xs, y, tparams1, tparams2, last_only=True):
-          pred_error,
-    args, # args to cost function.
-    mapped = False,
+          loss, # : (train -> Theano Float)
+          acc
+          args=[xis,yi]
 )
     

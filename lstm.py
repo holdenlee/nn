@@ -1,13 +1,13 @@
 import numpy as np
-from theano import *
+import theano
 import theano.tensor as T
 from theano.tensor.nnet import *
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from collections import OrderedDict
 
-import optimizers
-import utilities
-import nn_utilities
+from optimizers import *
+from utilities import *
+from nn_utilities import *
 
 """Parameters"""
 def unpack_params(tparams, li):
@@ -46,7 +46,7 @@ def init_params_nn(n, m, init='zeros'):
     return init_params_with_f_nn(n,m,f,g)
 
 #returns a dictionary of parameters, initialized using the functions f and g.
-def init_params_f_nn(n,m,f,g):
+def init_params_with_f_nn(n,m,f,g):
     pairs = [("W",np.asarray(g(n, m))),
              ("b",np.asarray(f(m)))]
     return OrderedDict(pairs)
@@ -110,7 +110,7 @@ def sequence_multiple_lstm(Cs0, hs0, xss, tparams):
 def fns_lstm(C0, h0, xis, yi, tparams1, tparams2):
     #, last_only = True):
     #evaluate the LSTM on this sequence
-    [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
+    [C_vals, h_vals] = sequence_lstm(C0, h0, xis, tparams1)
     #it's simpler to get both the function for the last and the function for all
     """ 
     if last_only:
@@ -135,7 +135,7 @@ def fns_multiple_lstm(m, xis, yi, (tparams1, tparams2)):
     C0 = np.zeros(m)
     h0 = np.zeros(m)
     #evaluate the LSTM on this sequence
-    [C_vals, h_vals] = sequence_lstm(C0, h0, xs, tparams)
+    [C_vals, h_vals] = sequence_lstm(C0, h0, xis, tparams1)
     #feed into the neural net and get vector of activations
     acts = nn_layer(h_vals)
     #prediction is the argmax value. Take argmax along innermost (-1) axis
@@ -169,7 +169,7 @@ def init_params_with_f_lstm(n,m,f,g):
              ("WC",np.asarray(g(m+n, m))),
              ("bC",np.asarray(f(m))),
              ("Wo",np.asarray(g(m+n, n))),
-             ("bo",np.asarray(f(o)))]
+             ("bo",np.asarray(f(m)))]
     return OrderedDict(pairs)
 
 #Int^b -> R^{l * n} -> (R^{b * s * n}, R^{b * n})
@@ -182,43 +182,52 @@ def get_data_f(indices, data):
 #li's are sequences, ex. [0,3,2,1,1,3,1]
 #the elements of the sequence are in [0..(n-1)], ex. n=4 above
 #m is the memory size
-#s is the sequence length, ex. 3 divides the above into [0,3,2],..,[1,3,1].
-def train_lstm(li_train, li_valid, li_test, n, m, s, batch_size):
-    #m:Int -> Int -> R^m
-    hot_li_train, hot_li_valid, hot_li_test = [map(lambda x: oneHot(n, x), li) for li in [li_train, li_valid, li_test]]
+#s is the sequence length, ex. 3 divides the above into [0,3,2],..,[1,3,1]. 
+##li_test=[]
+def train_lstm(li_train, li_valid, n, m, s, batch_size, valid_batch_size=-1):
+    if valid_batch_size == -1:
+        valid_batch_size = batch_size
+    #turns li_train, etc. into one-hot vectors. (li_train is a list of characters.)
+    hot_li_train, hot_li_valid = [map(lambda x: hot(n, x), li) for li in [li_train, li_valid]]
+    ##hot_li_test
     #n_seqs_train, n_seqs_valid, n_seqs_test = [len(li) - s + 1 for li in [li_train, li_valid, li_test]]
     #note alternatively we can keep it as a single tensor...
 
-    def batch_maker(data):
+    def batch_maker(b_size, data):
         return get_minibatches_idx(len(data)-s, batch_size, shuffle=True)
+
+    # note this gives a tuple right now.
+    def get_data_f(batch_ids, li):
+        return ([[li[x] for x in range(i, i+s)] for i in batch_ids], [li[i+s] for i in batch_ids])
+
 
     xis = T.dtensor3('xis')
     yi = T.dmatrix('yi')
     tparams1 = init_params_lstm(m,n,'rand')
     tparams2 = init_params_lstm(m,n,'rand')
-    _,_,loss,acc,_,_,_ = fns_multiple_lstm(m, xis, yi, tparams1, tparams2)
+    _,_,loss,acc,_,_,_ = fns_multiple_lstm(m, xis, yi, (tparams1, tparams2))
+    err = 1 - acc
+    #warning, these require m as argument.
     #loss_f = function([xis,yi],loss)
     #acc_f = function([xis,yi],acc)
 
-    train(batch_maker, # : a -> [b] 
-          #function that given the data, returns a list batch identifiers (ex. [Int])
-          get_data_f, # : b -> a -> train
-          #function that given a list of batch identifiers, gives a function that takes the data and gives training
-          #CHECK the numpy initialization
-          loss, # : (train -> Theano Float)
-          acc,
-          args=[xis,yi],
-          patience=10,  # Number of epoch to wait before early stop if no progress
-          max_epochs=5000,  # The maximum number of epoch to run,
-          optimizer=rmsprop,
-          saveto='model.npz',
-          validFreq=500,  # Compute the validation error after this number of update.
-          saveFreq=1000,  # Save the parameters after every saveFreq updates
-          batch_size=16,  # The batch size during training.
-          valid_batch_size=64,  # The batch size used for validation/test set.
-          init_params=init_params_lstm(n, m), # initial parameters
-          data_train=li_train , # : a (should be list of some sort)
-          data_valid=li_valid, # : a
-          data_test=li_test, # : a
-)
-    
+    arg_dict = {init_params : init_params_lstm(n, m),
+                data_train : li_train, 
+                data_valid : li_valid,
+                batch_maker : batch_maker,
+                get_data_f : get_data_f,
+                cost : loss, 
+                pred_error : err, 
+                args : [xis,yi], 
+                tparamss : [tparams1, tparams2], 
+                patience : 10, 
+                max_epochs : 5000, 
+                dispFreq : 10, 
+                optimizer : rmsprop,
+                saveto : 'lstm.npz',
+                validFreq : 500,
+                saveFreq : 1000,
+                batch_size : 16,
+                valid_batch_size : 64}
+                
+    train(**arg_dict)

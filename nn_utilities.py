@@ -1,4 +1,5 @@
 import numpy as np
+import theano.tensor as T
 import theano
 from collections import OrderedDict
 
@@ -60,10 +61,22 @@ def unwrap_theano_dict(zipped):
         new_params[kk] = vv.get_value()
     return new_params
 
+def hot(choices, n):
+    return [n==x for x in range(choices)]
+
 #Int -> c:Int -> R^c
 def oneHot(choices, n):
     #return [T.eq(n,x) for x in range(choices)]
     return T.as_tensor_variable([T.eq(n,x) for x in range(choices)])
+
+#?
+def zipp(params, tparams):
+    """
+    When we reload the model. Needed for the GPU stuff.
+    """
+    for kk, vv in params.iteritems():
+        tparams[kk].set_value(vv)
+
 
 def mapped_oneHot(choices, ns):
     return tmap(lambda x: oneHot(choices,x), ns)
